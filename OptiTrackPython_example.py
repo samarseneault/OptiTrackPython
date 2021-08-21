@@ -1,14 +1,15 @@
 from threading import Lock
 import time
 from OptiTrackPython import NatNetClient
-
+# client_ip='192.168.2.102',
+#                  server_ip="192.168.2.100",
 
 class TestNatNetClient(object):
     def __init__(self,
-                 client_ip='192.168.2.101',
-                 server_ip="192.168.2.100",
+                 client_ip="192.168.2.104",
+                 server_ip="192.168.2.102",
                  multicast_address="239.255.42.99",
-                 rigidbody_names2track=["CogniFly"]):
+                 rigidbody_names2track=["2"]):
 
         self.rigidbody_names2track = rigidbody_names2track
 
