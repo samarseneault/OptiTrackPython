@@ -21,6 +21,7 @@
 import sys
 import socket
 import struct
+import traceback
 from threading import Thread
 import numpy as np
 import time
@@ -102,7 +103,7 @@ class NatNetClient(object):
                                        multicast_address="239.255.42.99",
                                        command_port = 1510,
                                        data_port = 1511):
-        self.is_alive = True
+        self.is_alive = False
         self.client_ip = client_ip
         self.server_address = server_ip
         self.multicast_address = multicast_address
@@ -121,6 +122,8 @@ class NatNetClient(object):
         self.rigidBodyDescriptor = None
 
         self.__natNetStreamVersion = (3, 0, 0, 0)
+
+        self.commandSocket = None
 
     # Client/server message ids
     NAT_PING = 0
@@ -573,8 +576,8 @@ class NatNetClient(object):
                 offset += self.__unpackSkeletonDescription( data[offset:] )                
 
     def __dataThreadFunction(self, socketd, timeout=0.1):
-        # _buffersize = socketd.getsockopt(socket.SOL_SOCKET,
-        #                                  socket.SO_RCVBUF)
+        _buffersize = socketd.getsockopt(socket.SOL_SOCKET,
+                                         socket.SO_RCVBUF)
 
         clean = False
         while not clean:
@@ -586,13 +589,13 @@ class NatNetClient(object):
                 clean = True
         trace("Cleaning receiving buffer...Done!")
 
-        socketd.settimeout(timeout)
+        socketd.settimeout(timeout) # therefore the recv will not block forever...
 
         while self.is_alive:
             try:
-                # Block for input
+                # Block for input... until timeout
                 trace('Listening on data thread...')
-                data=socketd.recv(32768)  # 32k byte buffer size
+                data=socketd.recv(_buffersize)
                 if (len(data) > 0):
                     self.__processMessage(data)
                     # if the method above slows down below 1/120Hz, 
@@ -601,6 +604,11 @@ class NatNetClient(object):
                     # depend on the network interface driver implementation...
             except socket.timeout:
                 trace('NatNetClient socket timemout!')
+                continue
+            # There's no proper error correction during reception
+            # so this will avoid crashing because of one bad packet
+            except struct.error:
+                trace('NatNetClient struct error: %s' % traceback.format_exc())
                 continue
         try:
             socketd.setsockopt(socket.SOL_IP, 
@@ -673,7 +681,7 @@ class NatNetClient(object):
             commandStr="Ping"
             self.packetSize=len(commandStr) + 1
 
-        data=struct.pack('<H', command)
+        data = struct.pack('<H', command)
 
         data += struct.pack('<H', self.packetSize)
 
@@ -683,26 +691,30 @@ class NatNetClient(object):
         sockets.sendto(data, address)
 
     def run(self):
+
+        self.is_alive = True
+
         # Create the data socket
-        self.dataSocket=self.__createDataSocket(self.data_port, self.client_ip)
+        self.dataSocket = self.__createDataSocket(self.data_port, self.client_ip)
         if (self.dataSocket is None):
             trace("Could not open data channel")
             exit
 
         # Create the command socket
-        self.commandSocket=self.__createCommandSocket()
+        self.commandSocket = self.__createCommandSocket()
         if (self.commandSocket is None):
             trace("Could not open command channel")
             exit
 
         # Create a separate thread for receiving data packets
-        self.dataThread=Thread(target=self.__dataThreadFunction,
+        self.dataThread = Thread(target=self.__dataThreadFunction,
                                  args=(self.dataSocket,))
-        self.dataThread.start()
 
         # Create a separate thread for receiving command packets
-        self.commandThread=Thread(
-            target=self.__dataThreadFunction, args=(self.commandSocket,))
+        self.commandThread = Thread(target=self.__dataThreadFunction, 
+                                    args=(self.commandSocket,))
+
+        self.dataThread.start()
         self.commandThread.start()
         trace('Data threads started!')
 
@@ -714,8 +726,11 @@ class NatNetClient(object):
 
 
     def close(self):
-        self.__sendCommand(self.NAT_DISCONNECT, "",
-                           self.commandSocket, (self.server_address, self.command_port))
+            self.is_alive = False
+            self.dataThread.join()
+            self.__sendCommand(self.NAT_DISCONNECT, "",
+                               self.commandSocket, (self.server_address, self.command_port))
+            self.commandThread.join()
 
 if __name__ == '__main__':
     import argparse
@@ -777,14 +792,12 @@ if __name__ == '__main__':
             try:
                 time.sleep(0.01)
             except KeyboardInterrupt:
-                streamingClient.is_alive=False
                 break
     except KeyboardInterrupt:
         pass
     finally:
         print("Closing the connection...")
-        streamingClient.close()
-        time.sleep(1)
+        streamingClient.close() # Don't forget to call close ;)
         print("Connection closed!")
         if record2file and rigidbodyname:
             filename = "{}.pickle".format(rigidbodyname)
@@ -794,5 +807,5 @@ if __name__ == '__main__':
             print("To read the data, use: data = pickle.load(open('{}', 'rb'))".format(filename))
     
     # To read the data:
-    # with open("CogniFly.pickle", 'rb') as f: 
-    #     data = pickle.load(open("CogniFly.pickle", 'rb')) 
+    # with open("your_filename.pickle", 'rb') as f: 
+    #     data = pickle.load(open("your_filename.pickle", 'rb')) 

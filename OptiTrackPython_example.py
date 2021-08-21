@@ -32,10 +32,11 @@ class TestNatNetClient(object):
         while True:
             try:
                 for key in self.optitrack_reading:
-                    print("{} Received frame for rigid body {}:\n position: {}\n rotation: {}".format(self.optitrack_reading[key][0],
-                                                                                                      key,
-                                                                                                      self.optitrack_reading[key][1],
-                                                                                                      self.optitrack_reading[key][2]))
+                    with self.lock_opti: # using with because we don't care if it blocks...
+                        print("{} Received frame for rigid body {}:\n position: {}\n rotation: {}".format(self.optitrack_reading[key][0],
+                                                                                                          key,
+                                                                                                          self.optitrack_reading[key][1],
+                                                                                                          self.optitrack_reading[key][2]))
                 time.sleep(0.005)
             except KeyboardInterrupt:
                 self.streamingClient.is_alive = False
@@ -47,7 +48,7 @@ class TestNatNetClient(object):
                 if rbname in rigidBodyDescriptor:
                     if id == rigidBodyDescriptor[rbname][0]:
                         # skips this message if still locked
-                        if self.lock_opti.acquire(False):
+                        if self.lock_opti.acquire(False): # here we don't want to block!
                             try:
                                 # rotation is a quaternion!
                                 self.optitrack_reading[rbname] = [timestamp,
